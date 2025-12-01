@@ -1,0 +1,13 @@
+pymongo
+python-dotenv
+flask
+flask-cors
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+requests
+beautifulsoup4
+json5
+dotenv
