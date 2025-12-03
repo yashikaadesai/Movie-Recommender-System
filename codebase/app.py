@@ -9,7 +9,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-uri = os.environ.get('MONGODB_URI')
+uri = os.environ.get('MONGODB_URL')
 if not uri:
     raise ValueError("No MongoDB URI found in environment variables")
 
@@ -71,3 +71,9 @@ def login():
             return render_template('login.html')
     
     return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('user_id', None)
+    flash("You have been logged out.", "info")
+    return redirect(url_for('login'))
