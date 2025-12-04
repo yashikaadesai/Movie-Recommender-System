@@ -10,7 +10,6 @@ import csv
 import os
 from pathlib import Path
 from typing import Callable, Dict, Optional
-
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
