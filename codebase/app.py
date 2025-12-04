@@ -141,6 +141,7 @@ def index():
         error_message=error_message,
         selected_algorithm=selected_algorithm
     )
+
 def evaluate_algorithms():
     data = get_data()
     ratings = data['ratings']
@@ -168,3 +169,21 @@ def evaluate_algorithms():
     user_based_rmse = evaluate_predictions(actual_ratings, user_based_predictions)
     item_based_rmse = evaluate_predictions(actual_ratings, item_based_predictions)
     return user_based_rmse, item_based_rmse
+
+@app.route("/calculate_performance")
+def calculate_performance():
+    user_rmse, item_rmse = evaluate_algorithms()
+    better_model = "User-based" if user_rmse < item_rmse else "Item-based"
+    return jsonify({
+        "user_rmse": user_rmse,
+        "item_rmse": item_rmse,
+        "better_model": better_model
+    })
+
+@app.route("/performance")
+def performance():
+    # The performance page loads metrics asynchronously via JS.
+    return render_template("performance.html")
+
+if __name__ == "__main__":
+    app.run()
