@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Recommendation Dashboard</title>
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #2c3e50;
+            --accent-color: #e74c3c;
+            --light-gray: #f5f5f5;
+            --text-color: #333;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background-color: var(--secondary-color);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        header h1 {
+            margin: 0;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+        
+        .logout-btn {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            text-decoration: none;
+            margin-left: 15px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background-color: #c0392b;
+        }
+        
+        .error-message {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .scrollable-content {
+            max-height: 300px;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+        
+        .movie-list {
+            list-style: none;
+            padding: 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        
+        .movie-item {
+            background-color: var(--light-gray);
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .movie-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .movie-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .movie-rating {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        
+        .recommended {
+            border-left: 4px solid var(--accent-color);
+        }
+        
+        .form-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        select, button {
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            width: 100%;
+            max-width: 300px;
+        }
+        
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        .users-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .user-similarity {
+            background-color: var(--light-gray);
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .similarity-score {
+            font-size: 1.2em;
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        
+        .empty-state {
+            text-align: center;
+            color: #777;
+            padding: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .movie-list {
+                grid-template-columns: 1fr;
+            }
+            
+            .users-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            header {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .user-info {
+                margin-top: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Movie Recommendation Dashboard</h1>
+        <div class="user-info">
+            <span>User ID: {{ session.user_id }}</span>
+            <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+        </div>
+    </header>
+    
+    <div class="container">
+        {% if error_message %}
+            <div class="error-message">{{ error_message }}</div>
+        {% endif %}
+        
+        <div class="card">
+            <h2>System Performance</h2>
+            <p>View the performance comparison between recommendation algorithms.</p>
+            <a href="{{ url_for('performance') }}" class="logout-btn" target="_blank">View Performance Metrics</a>
+        </div>
+        
+        <div class="card form-container">
+            <h2>Get Recommendations</h2>
+            <form method="POST">
+                <label for="algorithm">Select Recommendation Algorithm:</label>
+                <select id="algorithm" name="algorithm">
+                    <option value="user" {% if selected_algorithm == 'user' %}selected{% endif %}>
+                        User-based Collaborative Filtering
+                    </option>
+                    <option value="item" {% if selected_algorithm == 'item' %}selected{% endif %}>
+                        Item-based Collaborative Filtering
+                    </option>
+                </select>
+                <br>
+                <button type="submit">Generate Recommendations</button>
+            </form>
+        </div>
+        
+        {% if recommendations %}
+            <div class="card">
+                <h2>Recommended Movies</h2>
+                <div class="scrollable-content">
+                    <ul class="movie-list">
+                        {% for movie_id, title, rating in recommendations %}
+                            <li class="movie-item recommended">
+                                <div class="movie-title">{{ title }}</div>
+                                <div>Movie ID: {{ movie_id }}</div>
+                                <div class="movie-rating">Predicted Rating: {{ rating }}</div>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        {% endif %}
+        
+        <div class="card">
+            <h2>Movies You Rated</h2>
+            <div class="scrollable-content">
+                {% if rated_movies %}
+                    <ul class="movie-list">
+                        {% for movie_id, title, rating in rated_movies %}
+                            <li class="movie-item">
+                                <div class="movie-title">{{ title }}</div>
+                                <div>Movie ID: {{ movie_id }}</div>
+                                <div class="movie-rating">Your Rating: {{ rating }}</div>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <div class="empty-state">
+                        <p>You haven't rated any movies yet.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        {% if similar_users %}
+            <div class="card">
+                <h2>Users with Similar Preferences</h2>
+                <div class="scrollable-content">
+                    <div class="users-grid">
+                        {% for user_id, score in similar_users %}
+                            <div class="user-similarity">
+                                <div>User ID: {{ user_id }}</div>
+                                <div class="similarity-score">{{ score|round(2) }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
