@@ -6,7 +6,6 @@ Create user-item matrices, and evaluate predictions using RMSE.
 
 from math import sqrt
 from typing import Tuple, List
-
 import os
 import numpy as np
 import pandas as pd
@@ -14,9 +13,86 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import cosine_similarity
-
+from pyspark.mllib.linalg import Vectors
+from pyspark.mllib.linalg.distributed import RowMatrix
 
 load_dotenv()
+
+def _ensure_spark_session():
+    """Create or return an existing SparkSession. Requires `pyspark` to be installed."""
+    try:
+        from pyspark.sql import SparkSession
+    except Exception as e:  # pragma: no cover - optional dependency
+        raise ImportError("pyspark is required for Hadoop/Spark similarity functions") from e
+
+    return SparkSession.builder.getOrCreate()
+
+
+def compute_user_similarity_hadoop(user_item_matrix: pd.DataFrame) -> pd.DataFrame:
+    """Compute user-user cosine similarities using Spark (suitable for Hadoop clusters).
+
+    This transposes the user-item matrix to produce an item x user RowMatrix and
+    calls `columnSimilarities()` which computes similarities between users (columns).
+    Returns a pandas DataFrame indexed/columned by the original user ids.
+    """
+    spark = _ensure_spark_session()
+    sc = spark.sparkContext
+
+    # Ensure a numeric numpy array (items x users)
+    mat = user_item_matrix.fillna(0).T.values
+
+    rows = [Vectors.dense([float(x) for x in row]) for row in mat]
+    rdd = sc.parallelize(rows)
+    rm = RowMatrix(rdd)
+    coord = rm.columnSimilarities()  # returns CoordinateMatrix
+
+    # Build a dense pandas DataFrame to return
+    user_ids = list(user_item_matrix.index)
+    n = len(user_ids)
+    sim_df = pd.DataFrame(0.0, index=user_ids, columns=user_ids)
+
+    for entry in coord.entries.collect():
+        i, j, v = int(entry.i), int(entry.j), float(entry.value)
+        ui, uj = user_ids[i], user_ids[j]
+        sim_df.at[ui, uj] = v
+        sim_df.at[uj, ui] = v
+
+    # set self-similarity to 1.0
+    for u in user_ids:
+        sim_df.at[u, u] = 1.0
+
+    return sim_df
+
+
+def compute_item_similarity_hadoop(user_item_matrix: pd.DataFrame) -> pd.DataFrame:
+    """Compute item-item cosine similarities using Spark (suitable for Hadoop clusters).
+
+    This treats the user-item matrix rows as users and computes columnSimilarities
+    which returns similarity between items (columns).
+    """
+    spark = _ensure_spark_session()
+    sc = spark.sparkContext
+
+    mat = user_item_matrix.fillna(0).values
+    rows = [Vectors.dense([float(x) for x in row]) for row in mat]
+    rdd = sc.parallelize(rows)
+    rm = RowMatrix(rdd)
+    coord = rm.columnSimilarities()
+
+    item_ids = list(user_item_matrix.columns)
+    m = len(item_ids)
+    sim_df = pd.DataFrame(0.0, index=item_ids, columns=item_ids)
+
+    for entry in coord.entries.collect():
+        i, j, v = int(entry.i), int(entry.j), float(entry.value)
+        ii, jj = item_ids[i], item_ids[j]
+        sim_df.at[ii, jj] = v
+        sim_df.at[jj, ii] = v
+
+    for it in item_ids:
+        sim_df.at[it, it] = 1.0
+
+    return sim_df
 
 
 def load_ratings_from_db() -> pd.DataFrame:
