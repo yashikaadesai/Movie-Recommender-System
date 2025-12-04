@@ -2,6 +2,17 @@ from flask import Flask, request, render_template, redirect, url_for, session, f
 import pandas as pd
 import numpy as np
 from pymongo import MongoClient
+
+from rec_algos import (
+    load_ratings_from_db,
+    create_user_item_matrix,
+    compute_user_similarity,
+    compute_item_similarity,
+    predict_rating_user_based,
+    predict_rating_item_based,
+    evaluate_predictions,
+)
+
 import os
 from dotenv import load_dotenv
 
