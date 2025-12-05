@@ -4,6 +4,8 @@ import numpy as np
 from pymongo import MongoClient
 import sys
 import secrets
+import logging
+import certifi
 
 import importlib
 
@@ -61,15 +63,33 @@ uri = os.environ.get('MONGODB_URL')
 if not uri:
     raise ValueError("No MongoDB URI found in environment variables")
 
+# Configure basic logging so Render logs contain useful tracebacks
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("movie_recommender")
+
 def load_movies_from_db():
     """Load movie data from MongoDB"""
-    client = MongoClient(uri)
+    # Use certifi CA bundle to avoid TLS issues on some hosts
+    client = MongoClient(uri, tlsCAFile=certifi.where())
     db = client["Movie-Recommender"]
     movies_cursor = db["movies"].find()
     movies = pd.DataFrame(list(movies_cursor))
     if 'movieId' in movies.columns:
         movies['movieId'] = movies['movieId'].astype(int)
     return movies
+
+
+@app.route("/_health")
+def health():
+    return "ok", 200
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log full exception with stack trace for debugging in Render logs
+    logger.exception("Unhandled exception in Flask app")
+    # Return generic message to client
+    return "Internal Server Error", 500
 
 
 # Serve the static frontend (GitHub Pages content) from the docs/ folder
@@ -83,7 +103,7 @@ DOCS_DIR = os.path.join(PROJECT_ROOT, "docs")
 
 @app.route('/site/')
 def serve_site_index():
-    return send_from_directory(DOCS_DIR, 'index.html')
+    return send_from_directory(DOCS_DIR, 'login.html')
 
 
 @app.route('/site/<path:filename>')

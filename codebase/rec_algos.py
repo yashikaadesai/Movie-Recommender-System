@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from pymongo import MongoClient
+import certifi
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import cosine_similarity
 from pyspark.mllib.linalg import Vectors
@@ -104,7 +105,8 @@ def load_ratings_from_db() -> pd.DataFrame:
     if not uri:
         raise ValueError("No MongoDB URI found in environment variables")
 
-    client = MongoClient(uri)
+    # Use certifi CA bundle for reliable TLS with Atlas
+    client = MongoClient(uri, tlsCAFile=certifi.where())
     db = client["Movie-Recommender"]
     ratings = pd.DataFrame(list(db["ratings"].find()))
 
