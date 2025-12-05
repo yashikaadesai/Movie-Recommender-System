@@ -1,4 +1,5 @@
-**Project**: Movie Recommender System
+# CSE 482 (Big Data Analysis): Final Project
+## Movie Recommender System
 
 - **Description**: A small movie recommender prototype using MovieLens-style CSVs, a MongoDB backend, EDA visualizations (Plotly), and a simple Flask web UI with user- and item-based collaborative filtering. Optional Spark helpers are included for large-scale similarity computation.
 
