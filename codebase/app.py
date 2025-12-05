@@ -2,6 +2,8 @@ from flask import Flask, request, render_template, redirect, url_for, session, f
 import pandas as pd
 import numpy as np
 from pymongo import MongoClient
+import sys
+import secrets
 
 from rec_algos import (
     load_ratings_from_db,
@@ -18,7 +20,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
+# Ensure this module's directory is on sys.path so imports resolve
+BASE_DIR = os.path.dirname(__file__)
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+# Use the `templates` directory next to this file explicitly so Flask finds templates
+templates_path = os.path.join(BASE_DIR, "templates")
+app = Flask(__name__, template_folder=templates_path)
+
+# Configure secret key for session handling. Prefer setting `FLASK_SECRET_KEY` in .env
+secret_key = os.environ.get("FLASK_SECRET_KEY")
+if not secret_key:
+    # Generate a transient secret key and warn the developer
+    secret_key = secrets.token_hex(16)
+    print("Warning: FLASK_SECRET_KEY not set; generated a temporary secret key. Set FLASK_SECRET_KEY in .env for persistent sessions.")
+app.secret_key = secret_key
 
 uri = os.environ.get('MONGODB_URL')
 if not uri:
