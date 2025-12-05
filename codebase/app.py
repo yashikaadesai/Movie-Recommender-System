@@ -4,16 +4,38 @@ import numpy as np
 from pymongo import MongoClient
 import sys
 import secrets
+import logging
+import certifi
 
-from rec_algos import (
-    load_ratings_from_db,
-    create_user_item_matrix,
-    compute_user_similarity,
-    compute_item_similarity,
-    predict_rating_user_based,
-    predict_rating_item_based,
-    evaluate_predictions,
-)
+import importlib
+
+# Import `rec_algos` module in a way that works when running
+# as a package (e.g. `gunicorn codebase.app:app`) and when running
+# the file directly (python codebase/app.py).
+_pkg = __package__
+rec_mod = None
+try:
+    # preferred: import as a submodule of the current package
+    if _pkg:
+        rec_mod = importlib.import_module(f"{_pkg}.rec_algos")
+    else:
+        # not running as package; try top-level import
+        rec_mod = importlib.import_module("rec_algos")
+except Exception:
+    # fallback: try explicit package name `codebase.rec_algos`
+    try:
+        rec_mod = importlib.import_module("codebase.rec_algos")
+    except Exception as e:  # re-raise a clearer error
+        raise ImportError("Could not import rec_algos module") from e
+
+# Bind required symbols from the module
+load_ratings_from_db = rec_mod.load_ratings_from_db
+create_user_item_matrix = rec_mod.create_user_item_matrix
+compute_user_similarity = rec_mod.compute_user_similarity
+compute_item_similarity = rec_mod.compute_item_similarity
+predict_rating_user_based = rec_mod.predict_rating_user_based
+predict_rating_item_based = rec_mod.predict_rating_item_based
+evaluate_predictions = rec_mod.evaluate_predictions
 
 import os
 from dotenv import load_dotenv
@@ -41,15 +63,52 @@ uri = os.environ.get('MONGODB_URL')
 if not uri:
     raise ValueError("No MongoDB URI found in environment variables")
 
+# Configure basic logging so Render logs contain useful tracebacks
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("movie_recommender")
+
 def load_movies_from_db():
     """Load movie data from MongoDB"""
-    client = MongoClient(uri)
+    # Use certifi CA bundle to avoid TLS issues on some hosts
+    client = MongoClient(uri, tlsCAFile=certifi.where())
     db = client["Movie-Recommender"]
     movies_cursor = db["movies"].find()
     movies = pd.DataFrame(list(movies_cursor))
     if 'movieId' in movies.columns:
         movies['movieId'] = movies['movieId'].astype(int)
     return movies
+
+
+@app.route("/_health")
+def health():
+    return "ok", 200
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log full exception with stack trace for debugging in Render logs
+    logger.exception("Unhandled exception in Flask app")
+    # Return generic message to client
+    return "Internal Server Error", 500
+
+
+# Serve the static frontend (GitHub Pages content) from the docs/ folder
+# This exposes the static site under the `/site` path so the app and static
+# frontend can live on the same domain without route conflicts.
+from flask import send_from_directory
+
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+DOCS_DIR = os.path.join(PROJECT_ROOT, "docs")
+
+
+@app.route('/site/')
+def serve_site_index():
+    return send_from_directory(DOCS_DIR, 'login.html')
+
+
+@app.route('/site/<path:filename>')
+def serve_site_file(filename: str):
+    return send_from_directory(DOCS_DIR, filename)
 
 def get_data():
     if not hasattr(app, 'data'):
