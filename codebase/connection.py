@@ -6,7 +6,7 @@ import os
 load_dotenv()
 
 # Get MongoDB URI from environment variables
-uri = os.environ.get('MONGODB_URI')
+uri = os.environ.get('MONGODB_URL')
 if not uri:
     raise ValueError("No MongoDB URI found in environment variables")
 

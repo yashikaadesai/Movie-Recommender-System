@@ -11,3 +11,9 @@ requests
 beautifulsoup4
 json5
 dotenv
+plotly
+pyspark
+scipy
+gunicorn
+certifi
+kaleido

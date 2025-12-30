@@ -2,24 +2,275 @@ from flask import Flask, request, render_template, redirect, url_for, session, f
 import pandas as pd
 import numpy as np
 from pymongo import MongoClient
+import sys
+import secrets
+import logging
+import certifi
+
+import importlib
+
+# Import `rec_algos` module in a way that works when running
+# as a package (e.g. `gunicorn codebase.app:app`) and when running
+# the file directly (python codebase/app.py).
+_pkg = __package__
+rec_mod = None
+try:
+    # preferred: import as a submodule of the current package
+    if _pkg:
+        rec_mod = importlib.import_module(f"{_pkg}.rec_algos")
+    else:
+        # not running as package; try top-level import
+        rec_mod = importlib.import_module("rec_algos")
+except Exception:
+    # fallback: try explicit package name `codebase.rec_algos`
+    try:
+        rec_mod = importlib.import_module("codebase.rec_algos")
+    except Exception as e:  # re-raise a clearer error
+        raise ImportError("Could not import rec_algos module") from e
+
+# Bind required symbols from the module
+load_ratings_from_db = rec_mod.load_ratings_from_db
+create_user_item_matrix = rec_mod.create_user_item_matrix
+compute_user_similarity = rec_mod.compute_user_similarity
+compute_item_similarity = rec_mod.compute_item_similarity
+predict_rating_user_based = rec_mod.predict_rating_user_based
+predict_rating_item_based = rec_mod.predict_rating_item_based
+evaluate_predictions = rec_mod.evaluate_predictions
+
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
+# Ensure this module's directory is on sys.path so imports resolve
+BASE_DIR = os.path.dirname(__file__)
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
+# Use the `templates` directory next to this file explicitly so Flask finds templates
+templates_path = os.path.join(BASE_DIR, "templates")
+app = Flask(__name__, template_folder=templates_path)
 
-uri = os.environ.get('MONGODB_URI')
+# Configure secret key for session handling. Prefer setting `FLASK_SECRET_KEY` in .env
+secret_key = os.environ.get("FLASK_SECRET_KEY")
+if not secret_key:
+    # Generate a transient secret key and warn the developer
+    secret_key = secrets.token_hex(16)
+    print("Warning: FLASK_SECRET_KEY not set; generated a temporary secret key. Set FLASK_SECRET_KEY in .env for persistent sessions.")
+app.secret_key = secret_key
+
+uri = os.environ.get('MONGODB_URL')
 if not uri:
     raise ValueError("No MongoDB URI found in environment variables")
 
+# Configure basic logging so Render logs contain useful tracebacks
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("movie_recommender")
+
 def load_movies_from_db():
     """Load movie data from MongoDB"""
-    client = MongoClient(uri)
+    # Use certifi CA bundle to avoid TLS issues on some hosts
+    client = MongoClient(uri, tlsCAFile=certifi.where())
     db = client["Movie-Recommender"]
     movies_cursor = db["movies"].find()
     movies = pd.DataFrame(list(movies_cursor))
     if 'movieId' in movies.columns:
         movies['movieId'] = movies['movieId'].astype(int)
     return movies
+
+
+@app.route("/_health")
+def health():
+    return "ok", 200
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log full exception with stack trace for debugging in Render logs
+    logger.exception("Unhandled exception in Flask app")
+    # Return generic message to client
+    return "Internal Server Error", 500
+
+
+# Serve the static frontend (GitHub Pages content) from the docs/ folder
+# This exposes the static site under the `/site` path so the app and static
+# frontend can live on the same domain without route conflicts.
+from flask import send_from_directory
+
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+DOCS_DIR = os.path.join(PROJECT_ROOT, "docs")
+
+
+@app.route('/site/')
+def serve_site_index():
+    return send_from_directory(DOCS_DIR, 'login.html')
+
+
+@app.route('/site/<path:filename>')
+def serve_site_file(filename: str):
+    return send_from_directory(DOCS_DIR, filename)
+
+def get_data():
+    if not hasattr(app, 'data'):
+        print("Loading ratings from database...")
+        ratings = load_ratings_from_db()
+        print(f"Loaded {len(ratings)} ratings")
+        
+        print("Creating user-item matrix...")
+        user_item_matrix = create_user_item_matrix(ratings)
+        print(f"User-item matrix shape: {user_item_matrix.shape}")
+        
+        print("Computing user similarity...")
+        user_similarity = compute_user_similarity(user_item_matrix)
+        
+        print("Computing item similarity...")
+        item_similarity = compute_item_similarity(user_item_matrix)
+        
+        print("Loading movies from database...")
+        movies = load_movies_from_db()
+        print(f"Loaded {len(movies)} movies")
+        
+        app.data = {
+            'ratings': ratings,
+            'user_item_matrix': user_item_matrix,
+            'user_similarity': user_similarity,
+            'item_similarity': item_similarity,
+            'movies': movies
+        }
+    return app.data
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+        
+    if request.method == 'POST':
+        try:
+            user_id = int(request.form["userId"])
+            data = get_data()  # Lazy-load data here
+            if user_id not in data['user_item_matrix'].index:
+                flash(f"User ID {user_id} not found in the dataset.", "error")
+                return render_template('login.html')
+            session['user_id'] = user_id
+            return redirect(url_for('index'))
+        except ValueError:
+            flash("Invalid User ID. Please enter a numeric value.", "error")
+            return render_template('login.html')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('user_id', None)
+    flash("You have been logged out.", "info")
+    return redirect(url_for('login'))
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    data = get_data()  # Load data on demand
+    user_item_matrix = data['user_item_matrix']
+    user_similarity = data['user_similarity']
+    item_similarity = data['item_similarity']
+    movies = data['movies']
+    
+    user_id = session['user_id']
+    error_message = None
+    rated_movies = []
+    recommendations = []
+    similar_users = []
+    selected_algorithm = "user"
+    
+    # Get the logged-in user's ratings
+    user_ratings = user_item_matrix.loc[user_id]
+    rated_movie_ids = user_ratings[user_ratings > 0].index.tolist()
+    for movie_id in rated_movie_ids:
+        try:
+            title = movies[movies["movieId"] == movie_id]["title"].values[0]
+            rating = round(user_ratings[movie_id], 2)
+            rated_movies.append((movie_id, title, rating))
+        except (IndexError, KeyError):
+            continue
+
+    if request.method == "POST":
+        try:
+            selected_algorithm = request.form["algorithm"]
+            unrated_movies = user_ratings[user_ratings == 0].index.tolist()
+            predictions = {}
+            for movie_id in unrated_movies:
+                if selected_algorithm == "user":
+                    pred_rating = predict_rating_user_based(user_id, movie_id, user_item_matrix, user_similarity, k=5)
+                else:
+                    pred_rating = predict_rating_item_based(user_id, movie_id, user_item_matrix, item_similarity, k=5)
+                predictions[movie_id] = pred_rating
+            top_movies = sorted(predictions.items(), key=lambda x: x[1], reverse=True)[:10]
+            for movie_id, rating in top_movies:
+                try:
+                    title = movies[movies["movieId"] == movie_id]["title"].values[0]
+                    recommendations.append((movie_id, title, round(rating, 2)))
+                except (IndexError, KeyError):
+                    continue
+            # Compute top 5 similar users (excluding current user)
+            sim_scores = user_similarity.loc[user_id].drop(user_id)
+            top_similar = sim_scores.sort_values(ascending=False).head(5)
+            for similar_user_id, score in top_similar.items():
+                similar_users.append((similar_user_id, round(score, 2)))
+        except Exception as e:
+            error_message = str(e)
+    
+    return render_template(
+        "index.html",
+        rated_movies=rated_movies,
+        recommendations=recommendations,
+        similar_users=similar_users,
+        error_message=error_message,
+        selected_algorithm=selected_algorithm
+    )
+
+def evaluate_algorithms():
+    data = get_data()
+    ratings = data['ratings']
+    train_data = ratings.sample(frac=0.8, random_state=42)
+    test_data = ratings.drop(train_data.index)
+    train_matrix = create_user_item_matrix(train_data)
+    train_user_sim = compute_user_similarity(train_matrix)
+    train_item_sim = compute_item_similarity(train_matrix)
+    
+    user_based_predictions = []
+    item_based_predictions = []
+    actual_ratings = []
+    
+    for _, row in test_data.iterrows():
+        user_id_val, movie_id, rating = row['userId'], row['movieId'], row['rating']
+        try:
+            user_pred = predict_rating_user_based(user_id_val, movie_id, train_matrix, train_user_sim, k=5)
+            item_pred = predict_rating_item_based(user_id_val, movie_id, train_matrix, train_item_sim, k=5)
+            user_based_predictions.append(user_pred)
+            item_based_predictions.append(item_pred)
+            actual_ratings.append(rating)
+        except:
+            continue
+    
+    user_based_rmse = evaluate_predictions(actual_ratings, user_based_predictions)
+    item_based_rmse = evaluate_predictions(actual_ratings, item_based_predictions)
+    return user_based_rmse, item_based_rmse
+
+@app.route("/calculate_performance")
+def calculate_performance():
+    user_rmse, item_rmse = evaluate_algorithms()
+    better_model = "User-based" if user_rmse < item_rmse else "Item-based"
+    return jsonify({
+        "user_rmse": user_rmse,
+        "item_rmse": item_rmse,
+        "better_model": better_model
+    })
+
+@app.route("/performance")
+def performance():
+    # The performance page loads metrics asynchronously via JS.
+    return render_template("performance.html")
+
+if __name__ == "__main__":
+    app.run()

@@ -10,7 +10,6 @@ import csv
 import os
 from pathlib import Path
 from typing import Callable, Dict, Optional
-
 from dotenv import load_dotenv
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
@@ -43,7 +42,7 @@ links_collection = db["links"]
 
 
 # Dataset directory
-DATASET_DIR = Path(__file__).resolve().parent.joinpath("..", "dataset", "ml-latest-small")
+DATASET_DIR = Path(__file__).resolve().parent.joinpath("..", "dataset")
 
 
 def load_csv_to_collection(

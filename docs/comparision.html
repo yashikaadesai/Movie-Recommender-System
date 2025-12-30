@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Model Performance Comparison</title>
+  <style>
+    :root {
+      --primary-color: #3498db;
+      --secondary-color: #2c3e50;
+      --accent-color: #e74c3c;
+      --light-gray: #f5f5f5;
+      --text-color: #333;
+      --success-color: #2ecc71;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f9f9f9;
+      color: var(--text-color);
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    header {
+      background-color: var(--secondary-color);
+      color: white;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .metric-card {
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      text-align: center;
+    }
+    .metric-value {
+      font-size: 2.5rem;
+      font-weight: bold;
+      color: var(--primary-color);
+      margin: 10px 0;
+    }
+    .metric-label {
+      font-size: 1.2rem;
+      color: #777;
+    }
+    .best-model {
+      background-color: #e8f7f3;
+      border-left: 4px solid var(--success-color);
+    }
+    .best-model .metric-value {
+      color: var(--success-color);
+    }
+    .card {
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      margin-top: 40px;
+    }
+    .back-link {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 10px 15px;
+      background-color: var(--primary-color);
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .back-link:hover {
+      background-color: #2980b9;
+    }
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      flex-direction: column;
+    }
+    .spinner {
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid var(--primary-color);
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 10px;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    .loading-text {
+      font-size: 18px;
+      color: var(--secondary-color);
+    }
+  </style>
+</head>
+<body>
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Calculating performance metrics...</div>
+  </div>
+  <header>
+    <h1>Recommendation Model Performance</h1>
+  </header>
+  <div class="container">
+    <div class="metrics-grid">
+      <div id="userCard" class="metric-card">
+        <h2>User-based CF</h2>
+        <div id="userRMSE" class="metric-value">--</div>
+        <div class="metric-label">RMSE (lower is better)</div>
+        <p id="userBest" style="display: none;"><strong>✓ Best Performing Model</strong></p>
+      </div>
+      <div id="itemCard" class="metric-card">
+        <h2>Item-based CF</h2>
+        <div id="itemRMSE" class="metric-value">--</div>
+        <div class="metric-label">RMSE (lower is better)</div>
+        <p id="itemBest" style="display: none;"><strong>✓ Best Performing Model</strong></p>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Methodology</h2>
+      <ul>
+        <li><strong>Dataset:</strong> MovieLens (100K ratings)</li>
+        <li><strong>Split:</strong> 80% training, 20% testing</li>
+        <li><strong>Metric:</strong> Root Mean Square Error (RMSE)</li>
+        <li><strong>k-nearest neighbors:</strong> 5</li>
+      </ul>
+      <p>
+        RMSE measures the square root of the average squared differences between predicted and actual ratings. Lower RMSE values indicate better performance.
+      </p>
+    </div>
+    <a href="{{ url_for('index') }}" class="back-link">← Back to Dashboard</a>
+  </div>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const loading = document.getElementById('loadingOverlay');
+      const userCard = document.getElementById('userCard');
+      const itemCard = document.getElementById('itemCard');
+      const userRMSE = document.getElementById('userRMSE');
+      const itemRMSE = document.getElementById('itemRMSE');
+      const userBest = document.getElementById('userBest');
+      const itemBest = document.getElementById('itemBest');
+  
+      fetch('{{ url_for("calculate_performance") }}')
+        .then(res => res.json())
+        .then(data => {
+          userRMSE.textContent = data.user_rmse.toFixed(4);
+          itemRMSE.textContent = data.item_rmse.toFixed(4);
+  
+          if (data.better_model === "User-based") {
+            userCard.classList.add("best-model");
+            userBest.style.display = "block";
+          } else {
+            itemCard.classList.add("best-model");
+            itemBest.style.display = "block";
+          }
+  
+          loading.style.display = "none";
+        })
+        .catch(err => {
+          console.error("Error:", err);
+          alert("Failed to load performance metrics.");
+          loading.style.display = "none";
+        });
+    });
+  </script>
+</body>
+</html>
